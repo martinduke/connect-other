@@ -1,7 +1,7 @@
 ---
-title: The PortsOnly Header Field: Arbitrary Transports over CONNECT-UDP
-abbrev: The PortsOnly Header Field
-docname: draft-duke-masque-proto-number-00
+title: The Other-Transport Extension: Arbitrary Transports over CONNECT-UDP
+abbrev: The Other-Transport Extension
+docname: draft-duke-masque-other-transport-00
 category: exp
 
 ipr: trust200902
@@ -23,9 +23,10 @@ author:
 
 --- abstract
 
-This document describes a new HTTP header called PortsOnly. When used with
-the CONNECT-UDP HTTP method, it enables a proxy to tunnel arbitrary transport
-protocols over HTTP streams.
+This document describes an extension to the HTTP CONNECT-UDP method
+{{!CONNECTUDP=I-D.ietf-masque-connect-udp}} that supports tunneling of other
+transport protocols, as long as the first four octets of those protocols encode
+the source and destination ports.
 
 --- middle
 
@@ -33,23 +34,23 @@ protocols over HTTP streams.
 
 The HTTP CONNECT method (section 4.3.6 of {{?RFC7231}}) has long provided a
 means of tunneling a TCP connection over an HTTP stream. The CONNECT-UDP
-method {{!I-D.ietf-masque-connect-udp}} extends this capability to include UDP
-datagrams over a stream.
+method {{!CONNECTUDP}} extends this capability to include UDP datagrams over a
+stream.
 
-As the CONNECT-UDP method delivers discrete datagrams to each endpoint, it can
-extend conceptually to any packetized protocol. The PortsOnly Header field
-allows a CONNECT-UDP proxy to tunnel packets with non-TCP, non-UDP protocol
-numbers, as long as the corresponding protocol meets minimal formatting
-requirements.
+As CONNECT-UDP delivers discrete datagrams to each endpoint, it can extend
+conceptually to any packetized protocol. The Other-Transport extension allows a
+CONNECT-UDP proxy to tunnel packets with non-TCP, non-UDP protocol numbers, as
+long as the corresponding protocol meets minimal formatting requirements.
 
 Specifically, any protocol header where the first four octets encode the source
 and destination ports can be tunneled using this framework. The client and proxy
 include all other protocol header information in the datagrams delivered over
-the tunnel.
+the tunnel. For example, 33 (DCCP, {{?RFC4330}}); 132 (SCTP, {{?RFC4960}}); and
+136 (UDPLite, {{?RFC3828}}) would all be valid candidates for Other-Transport.
 
-The PortsOnly Header Field is defined in accordance with
-{{!I-D.ietf-httpbis-header-structure}} to improve the safety of using and
-processing this field.
+In principle, TCP can be proxied using this extension as well. This might
+provide advantages over traditional HTTP CONNECT if the client's TCP
+implementation has features lacking at the proxy. 
 
 ## Conventions and Definitions {#conventions}
 
@@ -64,80 +65,76 @@ HTTP intermediaries (as defined in Section 2.3 of {{RFC7230}}) between the
 client and the proxy, those are referred to as "intermediaries" in this
 document.
 
-# The PortsOnly Header Field
+# Other-Transport Header Definition
 
-PortsOnly is a request and response Structured Header field that modifies
-CONNECT-UDP so that the proxy only appends the first four octets of a UDP header
-(the Source and Destination Ports) to datagrams from the client, and uses an IP 
-header with a protocol number (IPv4) or Next Header (IPv6) set to the value in
-the field.
+"Other-Transport" is an Item Structured Header
+{{!I-D.ietf-httpbis-header-structure}}. Its ABNF is:
 
-Similarly, the proxy will deliver packets from the server to the stream if and
-only if the protocol number or next header matches the specified value, rather
-than the value for UDP (17), in addition to the ports relevant to that stream.
+~~~
+Other-Transport = sf-integer
+~~~
 
-The field value is an Item of type Integer. It has no parameters.
+The value MUST be between 0 and 255, inclusive. Any other value is malformed.
+This value indicates the value of the Protocol Number (IPv4) or Next Header
+(IPv6) in IP headers corresponding to the CONNECT-UDP stream.
 
-The ABNF is:
-PortsOnly = sf-integer
+An Other-Transport header is ignored in any method other than CONNECT-UDP.
 
-The field value MUST have a value between 0 and 255, inclusive. Any other
-value means the header is malformed.
+A client that sends this header MUST include the entire transport header, with
+the exception of the first four octets, in each HTTP/3 DATAGRAM or Stream Chunk
+payload it sends. It MUST process incoming datagrams with the same assumption.
 
-An endpoint MUST ignore a PortsOnly field in any method other than
-CONNECT-UDP.
-
-## Sending PortsOnly
-
-When a client sends the PortsOnly header field, it MUST use a value that
+When a client sends the Other-Transport header field, it MUST use a value that
 corresponds to a protocol whose first four octets of each packet correspond to
 the source and destination ports. For example, 33 (DCCP, {{?RFC4330}}); 132
 (SCTP, {{?RFC4960}}); and 136 (UDPLite, {{?RFC3828}}) would all be valid
 choices.
 
-Subsequent datagrams, whether sent in DATAGRAM frames or Stream Chunks, MUST
-include all parts of the transport protocol header except for the port
-encodings.
+A proxy MUST NOT include this header unless it will prepend and strip port
+numbers instead of entire UDP headers, and use the Protocol Number in IP headers
+for both packets to the server and for demultiplexing incoming server packets.
 
-Unlike CONNECT-UDP clients that do not use PortsOnly, clients MUST NOT not send
-datagrams or stream chunks optimistically, as the server might not successfully
-process the PortsOnly header field and treat them as UDP datagrams, unless it
-has received a CONNECT_UDP_PORTS_ONLY setting from the proxy over an HTTP/2 or
-HTTP/3 connection.
+A proxy MAY choose not to send the header due to policy regarding specific
+protocol numbers.
 
-If the response does not include a PortsOnly header with the same field value
-as the request, the client MUST abort the stream.
+This extension is said to have been negotiated when both client and proxy
+indicate support for it in their CONNECT-UDP request and response using the
+same value.
 
-DATAGRAM frames or Stream Chunks arriving from the proxy will not contain the
-port fields of the header, but can otherwise be processed as a datagram of that
-protocol that arrived over IP.
+If the server responds without the Other-Transport header, the client may either
+proceed with UDP datagrams or close the stream.
 
-## Proxy Processing of PortsOnly
+A response with a Other-Transport value other than that provided by the client
+is malformed.
 
-A proxy that supports the PortsOnly header field SHOULD include the
-CONNECT_UDP_PORTS_ONLY setting in its HTTP/2 or HTTP/3 SETTINGS frame to
-reduce client latency.
+# Datagram Encoding of Proxied Packets
 
-A proxy MUST respond to a PortsOnly header with an PortsOnly header with an
-identical field value.
+All DATAGRAM frames corresponding to the negotiated Datagram-Flow-Id headers
+are processed in accordance with the Other-Transport extension, if negotiated.
 
-The proxy assigns a source and destination ports identically to conventional
-CONNECT-UDP and prepends these to datagrams from the client, in addition to an
-IP header with the field value in the Protocol Number (IPv4) or Next Header
-(IPv6) field.
+All DATAGRAM frames MUST include the entire IP payload with the exception of the
+first four octets.
 
-The proxy matches packets arriving from the server to a CONNECT-UDP stream if
-the Protocol Number or Next Header field matches, and the first four octets
-after the IP header match the assigned ports.
+If a client sent an Other-Transport header, it MUST NOT send DATAGRAM frames
+until it confirms this extension has been negotiated. If the proxy does not
+support Other-Transport, it will interpret DATAGRAM frames as UDP payloads, with
+unpredictable results.
 
-## HTTP Intermediaries
+# Stream Encoding of Proxied Packets
+
+Endpoints use the 0x10 Stream Chunk Type to encode datagrams.
+
+Clients MAY send payloads using Stream Chunks before negotiation is complete.
+Proxies that do not support the extension will simply ignore these chunks.
+
+# HTTP Intermediaries
 
 HTTP Intermediaries that discover that an upstream proxy does not support
-the PortsOnly header MUST abort the stream in the direction of the client.
+the Other-Transport header MUST abort the stream in the direction of the client.
 
 # Security Considerations {#security}
 
-CONNECT-UDP streams that use the PortsOnly header have similar security
+CONNECT-UDP streams that use the Other-Transport header have similar security
 properties to other CONNECT-UDP streams, as described in
 {{!I-D.ietf-masque-connect-udp}}.
 
@@ -145,33 +142,39 @@ However, as more of the transport header originates at the server, and the
 tunneled protocols are less ubiquitous than UDP, these headers may serve to
 fingerprint the protocol implementation that generated them.
 
-Furthermore, more degrees of freedom enhances the ability of clients to
-induce the proxy to generate certain packets, which can have undesirable
-effects in the network while being less traceable to the client.
+Furthermore, additional control over packet headers enhances the ability of
+clients to induce the proxy to generate certain packets, which might have
+undesirable effects in the network while being less traceable to the client.
 
 # IANA Considerations
 
-## PortsOnly 
+## HTTP Header
 
-This document defines the "PortsOnly" HTTP header field, and registers it in the
-Permanent Message Header Fields registry.
+This document requests that IANA registers the "Other-Transport" header in the
+"Permanent Message Header Field Names" registry maintained at
+<[](https://www.iana.org/assignments/message-headers)>.
 
-o Header field name: PortsOnly
-o Applicable Protocol: HTTP
-o Status: experimental
-o Author/Change controller: IETF
-o Specification document(s): This document
-o Related information: for other transports over CONNECT-UDP
+~~~
+  +-------------------+----------+--------+---------------+
+  | Header Field Name | Protocol | Status |   Reference   |
+  +-------------------+----------+--------+---------------+
+  |   Other-Transport |   http   |  std   | This document |
+  +-------------------+----------+--------+---------------+
+~~~
 
-## CONNECT_UDP_PORTS_ONLY Settings Frame
 
-The document adds this entry to both the HTTP/2 Settings and HTTP/3 Settings
-registry.
+## Stream Chunk Type Registration {#iana-chunk-type}
 
-o Code: TBD
-o Name: CONNECT_UDP_PORTS_ONLY
-o Initial Value: 0
-o Reference: This document
+This document will request IANA to register the following entry in the
+"CONNECT-UDP Stream Chunk Type" registry {{CONNECT-UDP}}:
+
+~~~
+  +-------+-----------------+-------------------------+---------------+
+  | Value |      Type       |       Description       |   Reference   |
+  +-------+-----------------+-------------------------+---------------+
+  | 0x10  | OTHER_TRANSPORT | Other Transport Protocol| This document |
+  +-------+-----------------+-------------------------+---------------+
+~~~
 
 --- back
 
