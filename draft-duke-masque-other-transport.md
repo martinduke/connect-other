@@ -1,7 +1,7 @@
 ---
 title: "The Other-Transport Extension: Arbitrary Transports over CONNECT-UDP"
 abbrev: The Other-Transport Extension
-docname: draft-duke-masque-other-transport-00
+docname: draft-duke-masque-other-transport-latest
 category: exp
 ipr: trust200902
 keyword: Internet-Draft
