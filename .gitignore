@@ -2,8 +2,10 @@
 *~
 /*-[0-9][0-9].xml
 archive.json
+draft-duke-quic-v2.xml
 draft*.xml
 *.html
+lib
 lib/
 *.md~
 metadata.min.js
@@ -20,4 +22,4 @@ report.xml
 *.upload
 venv/
 lib
-draft-duke-quic-v2.xml
+draft-duke-masque-other-transport.xml
